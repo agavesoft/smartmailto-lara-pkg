@@ -4,6 +4,7 @@ namespace Agavesoft\Smartmailto\Outbox;
 
 use Agavesoft\Smartmailto\Attachment;
 use Agavesoft\Smartmailto\Events\SmartmailtoOutboxFailed;
+use Agavesoft\Smartmailto\Mail\MessageEvents;
 use Agavesoft\Smartmailto\Exceptions\SmartmailtoException;
 use Agavesoft\Smartmailto\SmartmailtoClient;
 use Illuminate\Contracts\Container\Container;
@@ -95,7 +96,9 @@ class OutboxWorker
         $row->attempts++;
 
         try {
-            $body = $this->resolveAttachments($this->outbox->decode($row));
+            $body = $this->outbox->decode($row);
+            $row->message_meta = MessageEvents::extract($body); // nunca viaja a Smartmailto
+            $body = $this->resolveAttachments($body);
             $headers = $row->kind === 'send' ? ['Idempotency-Key' => $row->key] : [];
             $response = $this->client()->post(Outbox::KINDS[$row->kind], $body, $headers);
         } catch (SmartmailtoException $e) {
@@ -114,6 +117,7 @@ class OutboxWorker
         }
 
         $this->ack($row, $response);
+        MessageEvents::sent($row->message_meta ?? [], $response);
 
         return 'acked';
     }
@@ -182,10 +186,19 @@ class OutboxWorker
      */
     private function close(object $row, string $status, string $reason, ?SmartmailtoException $e = null): string
     {
+        if (! isset($row->message_meta)) {
+            try {
+                $decoded = $this->outbox->decode($row);
+                $row->message_meta = MessageEvents::extract($decoded);
+            } catch (Throwable) {
+                $row->message_meta = [];
+            }
+        }
         $error = $e !== null ? self::describe($e) : $reason;
 
         if ($row->kind === 'send' && ($state = $this->consult($row->key)) !== null && in_array($state, self::NO_EMERGENCY, true)) {
             $this->ack($row, ['status' => $state]);
+            MessageEvents::sent($row->message_meta ?? [], ['status' => $state]);
 
             return 'acked';
         }
@@ -199,6 +212,7 @@ class OutboxWorker
         if ($changed === 0) {
             return 'closed';
         }
+        MessageEvents::failed($row->message_meta ?? [], $e?->status, $error, $reason === 'expired' ? 'expired' : (ctype_digit($reason) ? 'rejected' : 'failed'), $e?->response ?? []);
 
         if ($status === Outbox::FAILED && $reason !== 'gave_up') {
             $this->alerts->rejected($row->template ?? $row->kind, $row->kind, $row->key, $error);

@@ -354,9 +354,11 @@ class SmartmailtoFake extends Smartmailto
     }
 
     /** Registra en vez de entregar. */
-    protected function deliver(string $endpoint, array $body, array $headers = [], ?string $key = null): ?array
+    protected function deliver(string $endpoint, array $body, array $headers = [], ?string $key = null, array $meta = []): ?array
     {
         $this->calls[] = ['endpoint' => $endpoint, 'body' => $body];
+        // Con el fake, un sendRaw / correo del mailer dispara SmartmailtoMessageSent como `queued`.
+        \Agavesoft\Smartmailto\Mail\MessageEvents::sent($meta, ['status' => 'queued']);
 
         return null;
     }
