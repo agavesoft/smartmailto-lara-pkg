@@ -70,6 +70,44 @@ class SmartmailtoFake extends Smartmailto
         return $this->templatesResponse;
     }
 
+    /** Fase 1: lo que responde listSends() en pruebas (por default, los envios registrados por el fake). */
+    public ?array $sendsResponse = null;
+
+    /** @var array<string, bool> correo => suprimido (para suppression()) */
+    public array $suppressed = [];
+
+    public function listSends(array $filters = [], bool $content = false): ?array
+    {
+        if ($this->sendsResponse !== null) {
+            return $this->sendsResponse;
+        }
+
+        $data = array_reverse(array_map(fn (array $body, int $i) => [
+            'id' => $i + 1,
+            'status' => 'sent',
+            'simulated' => true,
+            'recipient' => $body['email'] ?? null,
+            'template' => $body['template'] ?? null,
+            'subject' => $body['subject'] ?? null,
+            'idempotency_key' => $body['idempotency_key'] ?? null,
+            ...($content ? ['content' => ['subject' => $body['subject'] ?? null, 'html' => $body['html'] ?? null, 'source' => 'raw']] : []),
+        ], $this->calls('send'), array_keys($this->calls('send'))));
+
+        return ['data' => $data, 'meta' => ['page' => 1, 'per_page' => count($data), 'total' => count($data), 'last_page' => 1]];
+    }
+
+    public function suppression(string $email): ?array
+    {
+        $hit = $this->suppressed[strtolower($email)] ?? false;
+
+        return ['email' => $email, 'suppressed' => $hit, 'blocks_transactional' => $hit, 'reasons' => $hit ? [['reason' => 'hard_bounce']] : []];
+    }
+
+    public function rotateKey(?int $graceHours = null): ?array
+    {
+        return ['api_token' => 'mf_dev_fake_rotated', 'key' => ['id' => 2], 'previous' => ['id' => 1, 'expires_at' => now()->addHours($graceHours ?? 24)->toIso8601String()]];
+    }
+
     public function renderedEmail(int $sendId): ?array
     {
         return null;

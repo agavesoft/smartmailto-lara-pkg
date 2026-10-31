@@ -205,6 +205,43 @@ Como se convierte el mensaje:
 - Las imagenes embebidas (`cid:`) viajan como adjuntos normales.
 - En pruebas: `Smartmailto::fake()` y `assertSentRaw('Asunto', fn ($body) => ...)` / `assertNothingSentRaw()`.
 
+### Consultar envios, supresiones y rotar la llave (Fase 1)
+
+```php
+// Correos capturados (en DEV con el sender Dummy) o enviados: del mas nuevo al mas viejo.
+$page = Smartmailto::listSends([
+    'from' => now()->subDay(),         // y 'to'
+    'status' => ['sent', 'failed'],    // sent incluye simulados; suppressed incluye la lista blanca
+    'recipient' => 'ana@example.com',
+    'origin' => 'api',                 // api | workflow | event
+    'per_page' => 50,                  // max 100; 'page' => 2
+], content: true);                     // content.html de cada envio
+
+foreach ($page['data'] as $send) {
+    // id, status, recipient, subject, template, idempotency_key, created_at, render_url, content
+}
+
+// Lista de bloqueo: ¿esa direccion reboto o se quejo?
+Smartmailto::suppression('ana@example.com'); // ['suppressed' => true, 'blocks_transactional' => true, 'reasons' => [...]]
+
+// Rotar la llave: la nueva viene una sola vez; la actual sirve 24 h (o las que pidas) y despues se revoca.
+$rotated = Smartmailto::rotateKey(graceHours: 6);
+// Guarda $rotated['api_token'] en tu gestor de secretos y cambia SMARTMAILTO_API_TOKEN antes de que venza.
+```
+
+**Rebote y queja por webhook.** Si el admin prende «Avisar también rebotes duros y quejas» en Conexión, tu ruta del webhook (la de `smartmailto.webhook`) recibe ademas `email_bounced` y `email_complained`, firmados igual que `job_failed`:
+
+```json
+{"version":1,"event":"email_bounced","send_id":123,"idempotency_key":"nb:aviso:9","template":null,
+ "suppressed":true,"bounce_type":"Permanent","bounce_subtype":"General","recipients":1,"occurred_at":"..."}
+```
+
+No traen correos: crúzalos por `idempotency_key` o pregunta con `suppression($email)`. Antes de prenderlo, asegúrate de que tu controlador ignore (200) los eventos que no conoce.
+
+En pruebas: `Smartmailto::fake()` responde `listSends()` con lo que mandaste, `$fake->suppressed['ana@example.com'] = true` para `suppression()` y `rotateKey()` devuelve una llave falsa.
+
+Contrato completo: `docs/openapi.yaml` del servidor (`smartmailto-lara-manager`).
+
 ### Outbox: eventos garantizados (F-010)
 
 Con el outbox, `track`, `send`, `identify`, `link` y `reportExternalSend` **no encolan un job**: escriben una fila en la tabla `smartmailto_outbox` **dentro de la transaccion de tu app**. Si la accion de negocio hace rollback no queda nada; si hace commit, la fila espera hasta que Smartmailto **acusa** recibo con su llave. Requiere un servidor con F-010.

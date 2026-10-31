@@ -329,6 +329,68 @@ class Smartmailto
     }
 
     /**
+     * Fase 1: envios del proyecto (sincrono), del mas nuevo al mas viejo. Filtros: `from`, `to`
+     * (DateTimeInterface o ISO 8601), `status` (string o lista: sent, suppressed, failed...), `recipient`,
+     * `origin` (api|workflow|event), `idempotency_key`, `per_page` (max 100), `page`. Con `content: true`
+     * cada envio trae `content.html` (el correo capturado).
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array{data: list<array<string, mixed>>, meta: array<string, int>}|null
+     */
+    public function listSends(array $filters = [], bool $content = false): ?array
+    {
+        if (! $this->enabled()) {
+            return null;
+        }
+
+        $query = [];
+        foreach ($filters as $key => $value) {
+            $query[$key] = match (true) {
+                $value instanceof DateTimeInterface => $value->format(DATE_ATOM),
+                is_array($value) => implode(',', $value),
+                default => $value,
+            };
+        }
+        if ($content) {
+            $query['include'] = 'content';
+        }
+        $query = array_filter($query, fn ($v) => $v !== null && $v !== '');
+
+        return $this->app->make(SmartmailtoClient::class)->get('sends'.($query ? '?'.http_build_query($query) : ''));
+    }
+
+    /**
+     * Fase 1: si una direccion esta suprimida en el proyecto (rebote duro, queja, baja o manual).
+     * `blocks_transactional` es lo que importa para un transaccional (la baja de marketing no lo bloquea).
+     *
+     * @return array{email: string, suppressed: bool, blocks_transactional: bool, reasons: list<array<string, mixed>>}|null
+     */
+    public function suppression(string $email): ?array
+    {
+        if (! $this->enabled()) {
+            return null;
+        }
+
+        return $this->app->make(SmartmailtoClient::class)->get('suppressions?'.http_build_query(['email' => $email]));
+    }
+
+    /**
+     * Fase 1: rota la llave configurada. Devuelve `api_token` (la nueva, unica vez); la actual sigue
+     * sirviendo `graceHours` (null = default del servidor, 24) y despues se revoca sola. Guarda la nueva en
+     * tu gestor de secretos y actualiza SMARTMAILTO_API_TOKEN antes de que venza la gracia.
+     *
+     * @return array{api_token: string, key: array<string, mixed>, previous: array<string, mixed>}|null
+     */
+    public function rotateKey(?int $graceHours = null): ?array
+    {
+        if (! $this->enabled()) {
+            return null;
+        }
+
+        return $this->app->make(SmartmailtoClient::class)->post('keys/rotate', array_filter(['grace_hours' => $graceHours], fn ($v) => $v !== null));
+    }
+
+    /**
      * F-008: salud del proyecto en Smartmailto (sincrono). `status`: ok | degraded | down. Pensado para
      * la bandera de emergencia de la app (mandar sus correos esenciales directo mientras no sea ok).
      *
