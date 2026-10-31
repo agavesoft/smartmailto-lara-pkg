@@ -16,7 +16,7 @@ Version recomendada: `"agavesoft/smartmailto": "^2.5"` (tag estable), con un rep
 
 ```dotenv
 SMARTMAILTO_API_URL=https://smartmailto.example.com
-SMARTMAILTO_API_TOKEN=mf_live_...        # token del proyecto (se muestra una sola vez en el panel)
+SMARTMAILTO_API_TOKEN=sm_pro_...         # llave del proyecto: define el ambiente (sm_dev_..., sm_stag_...; las mf_* de antes = pro)
 SMARTMAILTO_ENABLED=true                 # false = el SDK no hace nada
 # SMARTMAILTO_QUEUE=true                 # default: encola tras el commit y reintenta
 # SMARTMAILTO_QUEUE_CONNECTION=
@@ -36,6 +36,18 @@ SMARTMAILTO_ENABLED=true                 # false = el SDK no hace nada
 ```
 
 Por default **cada llamada se encola despues del commit** de la transaccion en curso: necesitas un worker de cola corriendo (`php artisan queue:work`). Con la cola `sync` la llamada se hace una sola vez al terminar el commit, sin reintentos; una falla dispara `SmartmailtoDeliveryFailed`. Para reintentos reales usa una cola de verdad (`database`, `redis`). Con `SMARTMAILTO_QUEUE=false` las llamadas son sincronas y lanzan `SmartmailtoException` si fallan.
+
+### Ambientes (Fase 2 del servidor)
+
+Cada proyecto tiene ambientes `pro`, `dev`, `test`, `stag`, `pre`. **La llave define el ambiente**: usa en cada
+instalacion de tu app la llave de su ambiente (`sm_dev_...` en tu DEV, `sm_pro_...` en produccion). No hay que
+configurar nada mas en el SDK.
+
+- Fuera de `pro` solo salen correos a la **lista blanca** del ambiente (nace vacia: agrega correos o `@dominios`
+  en el panel). Lo bloqueado se reporta como `suppressed`.
+- `listSends()` solo devuelve envios del ambiente de la llave.
+- Una llave de `pro` puede estar restringida por IP: desde otra IP el servidor responde 403 `ip_not_allowed`.
+- Las llaves `mf_*` anteriores siguen funcionando y son de `pro`.
 
 ## Uso
 
