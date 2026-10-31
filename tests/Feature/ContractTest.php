@@ -583,3 +583,10 @@ test('Fase 3: versiones de plantilla, fijar, promover y rollback en el ambiente 
     Http::assertSent(fn (Request $r) => $r->url() === 'https://smartmailto.test/api/templates/recibo/revisions/activate' && $r['revision'] === 2);
     Http::assertSent(fn (Request $r) => $r->url() === 'https://smartmailto.test/api/templates/recibo/promote' && $r['from'] === 'dev');
 });
+
+test('Fase 4: senders() lista los remitentes del ambiente de la llave', function () {
+    Http::fake(['smartmailto.test/api/senders' => Http::response(['environment' => 'dev', 'data' => [['id' => 7, 'source' => 'account', 'revoked' => true]]], 200)]);
+
+    expect(Smartmailto::senders())->toBe(['environment' => 'dev', 'data' => [['id' => 7, 'source' => 'account', 'revoked' => true]]]);
+    Http::assertSent(fn (Request $r) => $r->method() === 'GET' && $r->url() === 'https://smartmailto.test/api/senders');
+});
