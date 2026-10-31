@@ -379,6 +379,21 @@ class Smartmailto
     }
 
     /**
+     * Fase 4: remitentes que puede usar el ambiente de la llave (`source`: project | account). Un
+     * remitente de cuenta con `revoked: true` hace fallar sus envios con `sender_revoked`. Sin credenciales.
+     *
+     * @return array{environment: string, data: list<array<string, mixed>>}|null
+     */
+    public function senders(): ?array
+    {
+        if (! $this->enabled()) {
+            return null;
+        }
+
+        return $this->app->make(SmartmailtoClient::class)->get('senders');
+    }
+
+    /**
      * Fase 1: rota la llave configurada. Devuelve `api_token` (la nueva, unica vez); la actual sigue
      * sirviendo `graceHours` (null = default del servidor, 24) y despues se revoca sola. Guarda la nueva en
      * tu gestor de secretos y actualiza SMARTMAILTO_API_TOKEN antes de que venza la gracia.
