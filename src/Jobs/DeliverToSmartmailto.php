@@ -4,6 +4,7 @@ namespace Agavesoft\Smartmailto\Jobs;
 
 use Agavesoft\Smartmailto\Events\SmartmailtoDeliveryFailed;
 use Agavesoft\Smartmailto\Exceptions\SmartmailtoException;
+use Agavesoft\Smartmailto\Mail\MessageEvents;
 use Agavesoft\Smartmailto\SmartmailtoClient;
 use DateTimeInterface;
 use Illuminate\Bus\Queueable;
@@ -34,6 +35,7 @@ class DeliverToSmartmailto implements ShouldQueue
         public array $body,
         public array $headers = [],
         public ?string $key = null,
+        public array $meta = [], // SmartmailtoMessageSent/Failed (sendRaw); nunca va a Smartmailto
     ) {}
 
     public function backoff(): array
@@ -67,6 +69,7 @@ class DeliverToSmartmailto implements ShouldQueue
         }
 
         $this->reportBatchItems($response);
+        MessageEvents::sent($this->meta, $response);
     }
 
     /**
@@ -112,5 +115,12 @@ class DeliverToSmartmailto implements ShouldQueue
             error: $exception->getMessage(),
             response: $exception instanceof SmartmailtoException ? $exception->response : [],
         ));
+        MessageEvents::failed(
+            $this->meta,
+            $exception instanceof SmartmailtoException ? $exception->status : null,
+            $exception->getMessage(),
+            $exception instanceof SmartmailtoException && ! $exception->transient ? 'rejected' : 'failed',
+            $exception instanceof SmartmailtoException ? $exception->response : [],
+        );
     }
 }

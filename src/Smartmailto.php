@@ -4,6 +4,7 @@ namespace Agavesoft\Smartmailto;
 
 use Agavesoft\Smartmailto\Contracts\PullResolver;
 use Agavesoft\Smartmailto\Exceptions\SmartmailtoException;
+use Agavesoft\Smartmailto\Mail\MessageEvents;
 use Agavesoft\Smartmailto\Jobs\DeliverToSmartmailto;
 use Agavesoft\Smartmailto\Outbox\Outbox;
 use Agavesoft\Smartmailto\Testing\PullTester;
@@ -278,6 +279,7 @@ class Smartmailto
         string|array|null $replyTo = null,
         array $to = [],
         string|array|null $from = null,
+        array $messageHeaders = [],
     ): ?array {
         if (trim($idempotencyKey) === '') {
             throw new InvalidArgumentException('Smartmailto::sendRaw() requires an idempotencyKey (e.g. "app:aviso:{id}").');
@@ -316,6 +318,8 @@ class Smartmailto
             ], fn ($value) => $value !== null),
             ['Idempotency-Key' => $idempotencyKey],
             $idempotencyKey,
+            // Vuelve en SmartmailtoMessageSent/Failed; no se manda a Smartmailto.
+            ['idempotency_key' => $idempotencyKey, 'headers' => array_map('strval', $messageHeaders)],
         );
     }
 
@@ -784,7 +788,7 @@ class Smartmailto
      * @param  array<string, mixed>  $body
      * @param  array<string, string>  $headers
      */
-    protected function deliver(string $endpoint, array $body, array $headers = [], ?string $key = null): ?array
+    protected function deliver(string $endpoint, array $body, array $headers = [], ?string $key = null, array $meta = []): ?array
     {
         if (! $this->enabled()) {
             return null;
@@ -792,16 +796,25 @@ class Smartmailto
 
         // F-010 (J1): con el outbox la llamada queda en la transaccion de tu app y la entrega el worker.
         if ($this->outbox()->enabled() && ($kind = $this->outbox()->kindFor($endpoint)) !== null) {
-            $this->outbox()->write($kind, $key, $body, $body['template'] ?? null, isset($body['send_before']) ? Carbon::parse($body['send_before']) : null);
+            $this->outbox()->write($kind, $key, $meta !== [] ? [...$body, MessageEvents::META_KEY => $meta] : $body, $body['template'] ?? null, isset($body['send_before']) ? Carbon::parse($body['send_before']) : null);
 
             return null;
         }
 
         if (! $this->config('queue', true)) {
-            return $this->app->make(SmartmailtoClient::class)->post($endpoint, $body, $headers);
+            try {
+                $response = $this->app->make(SmartmailtoClient::class)->post($endpoint, $body, $headers);
+            } catch (SmartmailtoException $e) {
+                MessageEvents::failed($meta, $e->status, $e->getMessage(), 'direct', $e->response);
+
+                throw $e;
+            }
+            MessageEvents::sent($meta, $response);
+
+            return $response;
         }
 
-        $job = (new DeliverToSmartmailto($endpoint, $body, $headers, $key))->afterCommit();
+        $job = (new DeliverToSmartmailto($endpoint, $body, $headers, $key, $meta))->afterCommit();
 
         $connection = $this->config('queue_connection');
         if ($connection) {
@@ -831,6 +844,7 @@ class Smartmailto
         try {
             $response = $this->app->make(SmartmailtoClient::class)->post($job->endpoint, $job->body, $job->headers);
             $job->reportBatchItems($response);
+            MessageEvents::sent($job->meta, $response);
         } catch (SmartmailtoException $e) {
             $job->failed($e);
         }

@@ -76,6 +76,7 @@ final class SmartmailtoTransport extends AbstractTransport
                 replyTo: $replyTo ? array_filter(['email' => $replyTo->getAddress(), 'name' => $replyTo->getName() ?: null]) : null,
                 to: $to,
                 from: $from ? array_filter(['email' => $from->getAddress(), 'name' => $from->getName() ?: null]) : null,
+                messageHeaders: self::headersOf($email),
             );
         } catch (SmartmailtoException $e) {
             throw new TransportException('Smartmailto mailer: '.$e->getMessage(), 0, $e);
@@ -84,6 +85,24 @@ final class SmartmailtoTransport extends AbstractTransport
         if (isset($response['id'])) {
             $message->setMessageId('smartmailto-'.$response['id']);
         }
+    }
+
+    /**
+     * Encabezados del mensaje original para SmartmailtoMessageSent/Failed (p. ej. `X-Mi-Invitacion`), en
+     * texto. Un nombre repetido se une con ", ". No viajan a Smartmailto.
+     *
+     * @return array<string, string>
+     */
+    public static function headersOf(\Symfony\Component\Mime\Email $email): array
+    {
+        $out = [];
+        foreach ($email->getHeaders()->all() as $header) {
+            $name = $header->getName();
+            $value = $header->getBodyAsString();
+            $out[$name] = isset($out[$name]) ? $out[$name].', '.$value : $value;
+        }
+
+        return $out;
     }
 
     /** `mail:` + Message-ID (sin <>); uno muy largo se resume (el servidor acepta hasta 191). */

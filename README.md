@@ -205,6 +205,57 @@ Como se convierte el mensaje:
 - Las imagenes embebidas (`cid:`) viajan como adjuntos normales.
 - En pruebas: `Smartmailto::fake()` y `assertSentRaw('Asunto', fn ($body) => ...)` / `assertNothingSentRaw()`.
 
+### Respuesta del envio: `SmartmailtoMessageSent` y `SmartmailtoMessageFailed`
+
+Cada correo del mailer `smartmailto` (y cada `sendRaw()`) dispara un evento cuando Smartmailto responde, en
+**los tres modos**: directo (`SMARTMAILTO_QUEUE=false`), cola (al correr el job) y outbox (al acusar el worker).
+Los encabezados del mensaje original vuelven en el evento: pon el tuyo y leelo en el listener. **Nunca llevan
+la llave de la API** (los headers del mensaje viajan con el job o cifrados en el outbox y no se mandan a
+Smartmailto).
+
+```php
+// Al armar el correo (Mailable::headers() o en el closure):
+$m->getSymfonyMessage()->getHeaders()->addTextHeader('X-Invitacion-Id', (string) $invitacion->id);
+
+// Listener (EventServiceProvider o Event::listen); usa ShouldQueue si haces trabajo pesado
+use Agavesoft\Smartmailto\Events\SmartmailtoMessageSent;
+use Agavesoft\Smartmailto\Events\SmartmailtoMessageFailed;
+
+Event::listen(function (SmartmailtoMessageSent $e) {
+    Invitacion::whereKey($e->header('X-Invitacion-Id'))->update([
+        'smartmailto_send_id' => $e->sendId,   // para GET /api/sends/{id}
+        'smartmailto_status'  => $e->status,   // simulated | queued | duplicate | (el que mande el servidor)
+    ]);
+});
+
+Event::listen(function (SmartmailtoMessageFailed $e) {
+    Log::warning('Invitacion no aceptada', ['id' => $e->header('X-Invitacion-Id'), 'status' => $e->status, 'reason' => $e->reason]);
+});
+```
+
+| Evento | Campos |
+|---|---|
+| `SmartmailtoMessageSent` | `sendId` (?int), `status` (string), `idempotencyKey`, `headers` (array nombre => valor), `duplicate` (bool), `response` (solo campos del acuse); `header($nombre)` |
+| `SmartmailtoMessageFailed` | `idempotencyKey`, `headers`, `status` (HTTP o null), `error`, `reason` (`direct`, `rejected`, `failed`, `expired`), `response`; `header($nombre)` |
+
+- `status` en `Sent` es el que trae la respuesta; si no trae uno: `simulated` (sender Dummy), `duplicate` (misma
+  `idempotency_key`) o `queued` (aceptado, aun no sale). El bloqueo por lista blanca o supresion (`blocked_allowlist`,
+  `suppressed`) se decide al salir, despues de la respuesta.
+- En modo directo, `Failed` se dispara y ademas el mailer lanza `TransportException`. En cola, `Failed` llega
+  junto con `SmartmailtoDeliveryFailed`; en outbox junto con `SmartmailtoOutboxFailed`.
+- Un listener que truena se registra en el log y no rompe la entrega.
+- Con `Smartmailto::fake()` se dispara `Sent` con `status = queued` (para probar tus listeners).
+
+**Estados posteriores** (`sent`, `suppressed`, `failed`, `delivered`, rebote, queja): guarda `sendId`/`idempotencyKey`
+del evento y combinalo con:
+
+1. El **webhook** del proyecto (seccion *Webhook de falla*): llegan `send_failed`/`send_expired` y, si el proyecto
+   activo los avisos de entregabilidad, `email_bounced` y `email_complained`, con `send_id` e `idempotency_key`:
+   relacionalos con lo que guardaste del evento.
+2. **`GET /api/sends/{id}`** (o `Smartmailto::listSends(['idempotency_key' => $key])`) para consultar el estado
+   cuando lo necesites (p. ej. un job que revisa las invitaciones que siguen en `queued`). La llave solo ve
+   envios de su ambiente.
+
 ### Consultar envios, supresiones y rotar la llave (Fase 1)
 
 ```php
