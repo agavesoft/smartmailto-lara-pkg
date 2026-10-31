@@ -566,3 +566,20 @@ test('la consulta previa codifica cada segmento de la llave y conserva la diagon
     expect(app(Outbox::class)->table()->value('status'))->toBe('acked');
     Http::assertSent(fn (Request $request) => $request->method() === 'POST' && $request->url() === 'https://smartmailto.test/api/outbox/heartbeat' && $request->data() === []);
 });
+
+test('Fase 3: versiones de plantilla, fijar, promover y rollback en el ambiente de la llave', function () {
+    Http::fake([
+        'smartmailto.test/api/templates/recibo/revisions/activate' => Http::response(['action' => 'activate', 'environment' => 'dev', 'revision' => 2, 'previous_revision' => null], 200),
+        'smartmailto.test/api/templates/recibo/revisions' => Http::response(['template' => 'recibo', 'environment' => 'dev', 'effective' => 2, 'environments' => [], 'revisions' => [['number' => 2], ['number' => 1]]], 200),
+        'smartmailto.test/api/templates/recibo/promote' => Http::response(['action' => 'promote', 'environment' => 'pro', 'revision' => 2, 'from_environment' => 'dev'], 200),
+        'smartmailto.test/api/templates/recibo/rollback' => Http::response(['error' => 'nothing_to_rollback'], 422),
+    ]);
+
+    expect(Smartmailto::templateRevisions('recibo')['effective'])->toBe(2)
+        ->and(Smartmailto::activateTemplateRevision('recibo', 2)['revision'])->toBe(2)
+        ->and(Smartmailto::promoteTemplate('recibo', 'dev')['from_environment'])->toBe('dev');
+    expect(fn () => Smartmailto::rollbackTemplate('recibo'))->toThrow(fn (SmartmailtoException $e) => expect($e->error())->toBe('nothing_to_rollback'));
+
+    Http::assertSent(fn (Request $r) => $r->url() === 'https://smartmailto.test/api/templates/recibo/revisions/activate' && $r['revision'] === 2);
+    Http::assertSent(fn (Request $r) => $r->url() === 'https://smartmailto.test/api/templates/recibo/promote' && $r['from'] === 'dev');
+});
