@@ -236,11 +236,12 @@ final class Attachment
             throw new InvalidArgumentException("Smartmailto attachment type .{$extension} not allowed (allowed: ".implode(', ', array_keys(self::TYPES)).').');
         }
 
-        if ($contentType === null || trim($contentType) === '') {
+        // Sin tipo, o el generico application/octet-stream (Laravel lo pone en attachData() sin mime): se
+        // infiere por la extension permitida. Un tipo concreto que no corresponde se sigue rechazando.
+        $type = strtolower(trim(explode(';', (string) $contentType)[0]));
+        if ($type === '' || $type === 'application/octet-stream') {
             return $accepted[0];
         }
-
-        $type = strtolower(trim(explode(';', $contentType)[0]));
         if (! in_array($type, $accepted, true)) {
             throw new InvalidArgumentException("Smartmailto attachment content type {$type} does not match .{$extension} (expected ".implode(' or ', $accepted).').');
         }
