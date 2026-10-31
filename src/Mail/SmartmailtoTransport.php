@@ -11,7 +11,6 @@ use Symfony\Component\Mailer\Exception\TransportException;
 use Symfony\Component\Mailer\SentMessage;
 use Symfony\Component\Mailer\Transport\AbstractTransport;
 use Symfony\Component\Mime\Address;
-use Symfony\Component\Mime\Email;
 use Symfony\Component\Mime\MessageConverter;
 use Symfony\Component\Mime\Part\DataPart;
 
@@ -94,7 +93,7 @@ final class SmartmailtoTransport extends AbstractTransport
      *
      * @return array<string, string>
      */
-    public static function headersOf(Email $email): array
+    public static function headersOf(\Symfony\Component\Mime\Email $email): array
     {
         $out = [];
         foreach ($email->getHeaders()->all() as $header) {

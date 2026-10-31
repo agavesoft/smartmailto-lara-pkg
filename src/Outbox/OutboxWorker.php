@@ -4,8 +4,8 @@ namespace Agavesoft\Smartmailto\Outbox;
 
 use Agavesoft\Smartmailto\Attachment;
 use Agavesoft\Smartmailto\Events\SmartmailtoOutboxFailed;
-use Agavesoft\Smartmailto\Exceptions\SmartmailtoException;
 use Agavesoft\Smartmailto\Mail\MessageEvents;
+use Agavesoft\Smartmailto\Exceptions\SmartmailtoException;
 use Agavesoft\Smartmailto\SmartmailtoClient;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Support\Carbon;

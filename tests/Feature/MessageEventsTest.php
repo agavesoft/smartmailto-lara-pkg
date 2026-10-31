@@ -7,16 +7,14 @@ use Agavesoft\Smartmailto\Events\SmartmailtoMessageFailed;
 use Agavesoft\Smartmailto\Events\SmartmailtoMessageSent;
 use Agavesoft\Smartmailto\Facades\Smartmailto;
 use Agavesoft\Smartmailto\Identity;
-use Agavesoft\Smartmailto\Jobs\DeliverToSmartmailto;
 use Agavesoft\Smartmailto\Outbox\OutboxWorker;
-use Agavesoft\Smartmailto\SmartmailtoClient;
 use Illuminate\Http\Client\Request;
 use Illuminate\Mail\Message;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\Queue;
 use Symfony\Component\Mailer\Exception\TransportException;
 
 beforeEach(function () {
@@ -105,14 +103,14 @@ test('cola (sync): Sent al responder; un rechazo da Failed rejected', function (
 
 test('cola real: el job lleva los headers y dispara Sent al entregarse', function () {
     config(['queue.default' => 'database']);
-    Queue::fake();
+    \Illuminate\Support\Facades\Queue::fake();
 
     meMail();
 
-    Queue::assertPushed(DeliverToSmartmailto::class, function ($job) {
+    \Illuminate\Support\Facades\Queue::assertPushed(\Agavesoft\Smartmailto\Jobs\DeliverToSmartmailto::class, function ($job) {
         Http::fake(['*/api/send' => Http::response(['ack' => true, 'id' => 9, 'duplicate' => false], 202)]);
         expect($job->body)->not->toHaveKey('_smartmailto_message');
-        $job->handle(app(SmartmailtoClient::class));
+        $job->handle(app(\Agavesoft\Smartmailto\SmartmailtoClient::class));
 
         return true;
     });

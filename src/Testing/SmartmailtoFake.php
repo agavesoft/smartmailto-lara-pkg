@@ -3,7 +3,6 @@
 namespace Agavesoft\Smartmailto\Testing;
 
 use Agavesoft\Smartmailto\Identity;
-use Agavesoft\Smartmailto\Mail\MessageEvents;
 use Agavesoft\Smartmailto\Smartmailto;
 use Closure;
 use DateTimeInterface;
@@ -359,7 +358,7 @@ class SmartmailtoFake extends Smartmailto
     {
         $this->calls[] = ['endpoint' => $endpoint, 'body' => $body];
         // Con el fake, un sendRaw / correo del mailer dispara SmartmailtoMessageSent como `queued`.
-        MessageEvents::sent($meta, ['status' => 'queued']);
+        \Agavesoft\Smartmailto\Mail\MessageEvents::sent($meta, ['status' => 'queued']);
 
         return null;
     }
