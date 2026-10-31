@@ -4,8 +4,8 @@ namespace Agavesoft\Smartmailto;
 
 use Agavesoft\Smartmailto\Contracts\PullResolver;
 use Agavesoft\Smartmailto\Exceptions\SmartmailtoException;
-use Agavesoft\Smartmailto\Mail\MessageEvents;
 use Agavesoft\Smartmailto\Jobs\DeliverToSmartmailto;
+use Agavesoft\Smartmailto\Mail\MessageEvents;
 use Agavesoft\Smartmailto\Outbox\Outbox;
 use Agavesoft\Smartmailto\Testing\PullTester;
 use DateTimeInterface;
@@ -538,6 +538,49 @@ class Smartmailto
     public function activateTemplate(string $name): ?array
     {
         return $this->provisioning('post', 'templates/'.rawurlencode($name).'/activate');
+    }
+
+    /**
+     * Fase 3: versiones inmutables de la plantilla (v1..n), la version que usa cada ambiente y la del
+     * ambiente de esta llave (`effective`). Requiere el aprovisionamiento habilitado.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function templateRevisions(string $name): ?array
+    {
+        return $this->provisioning('get', 'templates/'.rawurlencode($name).'/revisions');
+    }
+
+    /**
+     * Fase 3: fija la version `$revision` en el ambiente de esta llave (null = seguir la ultima).
+     *
+     * @return array<string, mixed>|null la activacion (`action`, `revision`, `previous_revision`, ...)
+     */
+    public function activateTemplateRevision(string $name, ?int $revision): ?array
+    {
+        return $this->provisioning('post', 'templates/'.rawurlencode($name).'/revisions/activate', ['revision' => $revision]);
+    }
+
+    /**
+     * Fase 3: fija en el ambiente de esta llave la version que usa `$from` (p. ej. con una llave de pro,
+     * promoteTemplate('recibo', 'dev') sube a pro lo probado en dev). Una llave de dev nunca cambia pro.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function promoteTemplate(string $name, string $from): ?array
+    {
+        return $this->provisioning('post', 'templates/'.rawurlencode($name).'/promote', ['from' => $from]);
+    }
+
+    /**
+     * Fase 3: regresa el ambiente de esta llave a la version que tenia antes de su ultimo cambio.
+     * Sin cambio previo: SmartmailtoException 422 `nothing_to_rollback`.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function rollbackTemplate(string $name): ?array
+    {
+        return $this->provisioning('post', 'templates/'.rawurlencode($name).'/rollback');
     }
 
     /**
