@@ -251,9 +251,26 @@ class SmartmailtoFake extends Smartmailto
 
     public function assertSent(string $template, ?Closure $callback = null): void
     {
-        $matches = array_filter($this->calls('send'), fn ($body) => $body['template'] === $template && ($callback === null || $callback($body)));
+        $matches = array_filter($this->calls('send'), fn ($body) => ($body['template'] ?? null) === $template && ($callback === null || $callback($body)));
 
         PHPUnit::assertNotEmpty($matches, "The expected [{$template}] email was not sent.");
+    }
+
+    /**
+     * Fase 0: algun envio sin plantilla (sendRaw o el mailer `smartmailto`) con ese asunto y que cumple el
+     * callback `fn (array $body)` (subject, html, text, email, cc, bcc, reply_to, attachments...).
+     */
+    public function assertSentRaw(?string $subject = null, ?Closure $callback = null): void
+    {
+        $matches = array_filter($this->calls('send'), fn ($body) => ! isset($body['template'])
+            && ($subject === null || ($body['subject'] ?? null) === $subject) && ($callback === null || $callback($body)));
+
+        PHPUnit::assertNotEmpty($matches, 'The expected email without template'.($subject !== null ? " [{$subject}]" : '').' was not sent.');
+    }
+
+    public function assertNothingSentRaw(): void
+    {
+        PHPUnit::assertEmpty(array_filter($this->calls('send'), fn ($body) => ! isset($body['template'])), 'Emails without template were sent.');
     }
 
     /** @param  string  $resource  templates | partials | workflows */
