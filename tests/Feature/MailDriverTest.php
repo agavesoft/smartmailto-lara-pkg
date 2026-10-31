@@ -2,6 +2,7 @@
 
 // Fase 0: sendRaw() y el mailer `smartmailto` (MAIL_MAILER=smartmailto -> POST /api/send sin plantilla).
 
+use Agavesoft\Smartmailto\Attachment;
 use Agavesoft\Smartmailto\Facades\Smartmailto;
 use Agavesoft\Smartmailto\Identity;
 use Agavesoft\Smartmailto\Mail\SmartmailtoTransport;
@@ -84,4 +85,23 @@ test('sin cola llega por HTTP a /api/send con Idempotency-Key y un rechazo es Tr
 test('la llave de idempotencia larga se resume', function () {
     expect(SmartmailtoTransport::idempotencyKey('<abc@x>'))->toBe('mail:abc@x')
         ->and(strlen(SmartmailtoTransport::idempotencyKey(str_repeat('a', 300).'@x')))->toBeLessThanOrEqual(191);
+});
+
+test('attachData sin mime (application/octet-stream de Laravel) infiere el tipo por la extension', function () {
+    $fake = Smartmailto::fake();
+
+    Mail::raw('Hola', function (Message $m) {
+        $m->from('no-reply@notificabot.com')->to('ana@example.com')->subject('Sin mime')
+            ->attachData('hola', 'prueba.txt')
+            ->attachData('a,b', 'datos.csv', ['mime' => 'application/octet-stream']);
+    });
+
+    $fake->assertSentRaw('Sin mime', fn ($body) => expect(array_column($body['attachments'], 'content_type'))->toBe(['text/plain', 'text/csv']) !== null);
+});
+
+test('un mime concreto que no corresponde a la extension se sigue rechazando', function () {
+    expect(fn () => Attachment::fromData('hola', 'prueba.txt', 'application/pdf'))->toThrow(InvalidArgumentException::class, 'does not match')
+        ->and(Attachment::fromData('hola', 'prueba.txt', 'application/octet-stream')->toArray()['content_type'])->toBe('text/plain')
+        ->and(Attachment::fromData('hola', 'prueba.txt', '')->toArray()['content_type'])->toBe('text/plain')
+        ->and(fn () => Attachment::fromData('x', 'malware.exe', 'application/octet-stream'))->toThrow(InvalidArgumentException::class, 'not allowed');
 });
