@@ -254,6 +254,72 @@ class Smartmailto
     }
 
     /**
+     * Fase 0: correo sin plantilla. Tu app arma el asunto y el cuerpo (`html` y/o `text`); Smartmailto
+     * aplica lista blanca, remitente, Dummy, idempotencia y adjuntos igual que con plantilla. Siempre es
+     * transaccional (sin baja de un clic ni pixel). Es lo que usa el mailer `smartmailto` de Laravel.
+     *
+     * @param  list<Attachment|UploadedFile|string>  $attachments
+     * @param  list<string>  $to
+     * @param  list<string>  $cc
+     * @param  list<string>  $bcc
+     * @param  string|array{email: string, name?: string|null}|null  $replyTo
+     * @param  string|array{email: string, name?: string|null}|null  $from
+     */
+    public function sendRaw(
+        Identity $identity,
+        string $subject,
+        ?string $html = null,
+        ?string $text = null,
+        string $idempotencyKey = '',
+        ?DateTimeInterface $sendBefore = null,
+        array $attachments = [],
+        array $cc = [],
+        array $bcc = [],
+        string|array|null $replyTo = null,
+        array $to = [],
+        string|array|null $from = null,
+    ): ?array {
+        if (trim($idempotencyKey) === '') {
+            throw new InvalidArgumentException('Smartmailto::sendRaw() requires an idempotencyKey (e.g. "app:aviso:{id}").');
+        }
+        if (trim($subject) === '') {
+            throw new InvalidArgumentException('Smartmailto::sendRaw() requires a subject.');
+        }
+        if (($html === null || $html === '') && ($text === null || $text === '')) {
+            throw new InvalidArgumentException('Smartmailto::sendRaw() requires html or text.');
+        }
+
+        if (! $this->enabled()) {
+            return null;
+        }
+
+        if ($sendBefore === null && $this->outbox()->enabled()) {
+            throw new InvalidArgumentException('Smartmailto::sendRaw() requires sendBefore with the outbox enabled.');
+        }
+
+        return $this->deliver(
+            'send',
+            array_filter([
+                ...$identity->toArray(),
+                'subject' => $subject,
+                'html' => $html !== '' ? $html : null,
+                'text' => $text !== '' ? $text : null,
+                'idempotency_key' => $idempotencyKey,
+                'send_before' => $sendBefore?->format(DATE_ATOM),
+                'to' => $this->recipients('to', $to),
+                'cc' => $this->recipients('cc', $cc),
+                'bcc' => $this->recipients('bcc', $bcc),
+                'reply_to' => $this->address('replyTo', $replyTo),
+                'from' => $this->address('from', $from),
+                'attachments' => $this->attachments($attachments),
+                'recipient_kind' => $identity->external ? 'external' : null,
+            ], fn ($value) => $value !== null),
+            ['Idempotency-Key' => $idempotencyKey],
+            $idempotencyKey,
+        );
+    }
+
+    /**
      * Lote de identify/track. Con backfill=true los eventos se guardan con su fecha real y no
      * disparan workflows (carga inicial). Se parte en lotes de 100.
      */
@@ -789,6 +855,12 @@ class Smartmailto
         if ($identity->external) {
             throw new InvalidArgumentException("Smartmailto::{$method}() does not accept Identity::external(): external recipients are never contacts.");
         }
+    }
+
+    /** Fase 0: el mailer `smartmailto` lo usa para poner sendBefore cuando el outbox esta prendido. */
+    public function outboxEnabled(): bool
+    {
+        return $this->outbox()->enabled();
     }
 
     protected function outbox(): Outbox

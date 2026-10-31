@@ -9,6 +9,7 @@ use Agavesoft\Smartmailto\Console\OutboxWorkCommand;
 use Agavesoft\Smartmailto\Console\ProvisionCommand;
 use Agavesoft\Smartmailto\Http\Middleware\VerifySmartmailtoPull;
 use Agavesoft\Smartmailto\Http\Middleware\VerifySmartmailtoWebhook;
+use Agavesoft\Smartmailto\Mail\SmartmailtoTransport;
 use Agavesoft\Smartmailto\Outbox\Outbox;
 use Agavesoft\Smartmailto\Pull\PullRoute;
 use Illuminate\Http\Client\Factory as HttpFactory;
@@ -37,6 +38,14 @@ class SmartmailtoServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // Fase 0: MAIL_MAILER=smartmailto manda los correos de la app por /api/send (sin plantilla).
+        $this->callAfterResolving('mail.manager', function ($manager) {
+            $manager->extend('smartmailto', fn (array $config) => new SmartmailtoTransport(
+                fn () => $this->app->make(Smartmailto::class),
+                $config,
+            ));
+        });
+
         // F-008 (B2): middleware opcional para la ruta del webhook de falla. F-011: el de la ruta del pull.
         $this->callAfterResolving('router', function ($router) {
             $router->aliasMiddleware('smartmailto.webhook', VerifySmartmailtoWebhook::class);

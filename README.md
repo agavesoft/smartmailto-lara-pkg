@@ -11,7 +11,7 @@ composer require agavesoft/smartmailto
 php artisan vendor:publish --tag=smartmailto-config   # opcional
 ```
 
-Version recomendada: `"agavesoft/smartmailto": "^2.5"` (tag estable), con un repositorio `vcs` a `https://github.com/agavesoft/notificabot-lara-pkg-sdk` mientras el paquete no este en Packagist.
+Version recomendada: `"agavesoft/smartmailto": "^2.5"` (tag estable), con un repositorio `vcs` a `https://github.com/agavesoft/smartmailto-lara-pkg` mientras el paquete no este en Packagist.
 `^2.5@dev` (develop como `2.5.x-dev`) solo es para probar lo que aun no se publica.
 
 ```dotenv
@@ -149,6 +149,62 @@ class SmartmailtoEmergencia implements ShouldQueue
 - Sin outbox sigue el contrato de v2.1: 410 → `SmartmailtoDeliveryFailed`, y el webhook `send_expired`; reporta igual con `reportExternalSend()`.
 - `Smartmailto::health()` (`ok`, `degraded`, `down`) sirve para tableros; ya no es motivo para mandar directo.
 
+### Correo sin plantilla y mailer de Laravel (Fase 0)
+
+`sendRaw()` manda un correo que arma tu app (sin plantilla en Smartmailto). Es siempre transaccional; Smartmailto aplica lista blanca, remitente (o el Dummy en DEV), idempotencia, CC/BCC/Reply-To y adjuntos, y lo guarda para consultarlo.
+
+```php
+Smartmailto::sendRaw(
+    Identity::external('ana@example.com'),
+    subject: 'Tu aviso',
+    html: '<p>Hola</p>',
+    text: 'Hola',                      // opcional: sin text, Smartmailto lo genera del html
+    idempotencyKey: "nb:aviso:{$id}",
+    cc: ['c@example.com'],
+);
+```
+
+#### `MAIL_MAILER=smartmailto`
+
+Con el mailer, **todos** los correos de la app (Mailables, Notifications, `Mail::raw`) salen por Smartmailto sin cambiar codigo:
+
+```php
+// config/mail.php
+'mailers' => [
+    // ...
+    'smartmailto' => [
+        'transport' => 'smartmailto',
+        // 'send_from' => true,          // false: no manda el From; usa el remitente del sender en Smartmailto
+        // 'send_before_minutes' => 60,  // solo con el outbox: vigencia del envio
+    ],
+],
+```
+
+```dotenv
+MAIL_MAILER=smartmailto
+MAIL_FROM_ADDRESS=no-reply@tu-dominio.com
+MAIL_FROM_NAME="${APP_NAME}"
+SMARTMAILTO_API_URL=https://smartmailto-dev.agv.dev
+SMARTMAILTO_API_TOKEN=            # llave del proyecto (desde tu gestor de secretos)
+SMARTMAILTO_QUEUE=false           # recomendado con el mailer: un rechazo lanza TransportException y Laravel lo ve
+```
+
+Como se convierte el mensaje:
+
+| Correo de Laravel | `/api/send` |
+|---|---|
+| Primer `To` | destinatario (`Identity::external`: no se vuelve contacto) |
+| Demas `To`, `Cc`, `Bcc` | `to`, `cc`, `bcc` (max 10 por lista) |
+| `Reply-To` (el primero), `From` | `reply_to`, `from` |
+| Asunto, HTML, texto | `subject`, `html`, `text` |
+| Adjuntos | base64 inline (tipos de `Attachment::TYPES`; otro tipo lanza `InvalidArgumentException`) |
+| `Message-ID` | `idempotency_key` = `mail:<message-id>` |
+
+- Con `SMARTMAILTO_QUEUE=true` (default del SDK) el mailer regresa de inmediato y la entrega va en la cola; una falla dispara `SmartmailtoDeliveryFailed` en vez de una excepcion.
+- Con `SMARTMAILTO_ENABLED=false` el correo se descarta en silencio.
+- Las imagenes embebidas (`cid:`) viajan como adjuntos normales.
+- En pruebas: `Smartmailto::fake()` y `assertSentRaw('Asunto', fn ($body) => ...)` / `assertNothingSentRaw()`.
+
 ### Outbox: eventos garantizados (F-010)
 
 Con el outbox, `track`, `send`, `identify`, `link` y `reportExternalSend` **no encolan un job**: escriben una fila en la tabla `smartmailto_outbox` **dentro de la transaccion de tu app**. Si la accion de negocio hace rollback no queda nada; si hace commit, la fila espera hasta que Smartmailto **acusa** recibo con su llave. Requiere un servidor con F-010.
@@ -280,7 +336,7 @@ Smartmailto::send('restablecer-contrasena', Identity::user($user->id, $user->ema
 - **Adjuntos y cola:** el contenido se lee al llamar `send()` y el job lleva el base64 (~1.37x el tamano de los archivos): no depende de que el archivo siga en disco cuando corre el worker. Consecuencias: (1) el payload del job puede pesar ~10 MB y queda **sin cifrar** en tu almacen de cola (`jobs` de la cola `database`, Redis); (2) **SQS no sirve** para envios con adjuntos (limite de 256 KB por mensaje): usa `database`/`redis` o `SMARTMAILTO_QUEUE=false` para esos envios. `Smartmailto::fake()` tambien guarda el base64.
 - **`to`, `cc`, `bcc`:** max 10 por lista; solo con plantillas `kind: transactional` (si no: 422 `recipients_require_transactional`). No crean contactos y la lista de supresion del proyecto les aplica.
 - **`replyTo` / `from`:** un correo o `['email' => ..., 'name' => ...]`. El `from` lo autoriza la politica del remitente (sender) con el que sale el envio (F-014): `fijo`, `lista` de direcciones permitidas o `dominio`; fuera de ella, 422 `from_not_allowed`. Si el remitente no permite copias o Reply-To: 422 `cc_not_allowed`, `bcc_not_allowed` o `reply_to_not_allowed`. Sin `from`, sale con el del remitente.
-- Contrato completo: `docs/api-envio-y-aprovisionamiento.md` del servidor (`notificabot-lara-smartmailto`).
+- Contrato completo: `docs/api-envio-y-aprovisionamiento.md` del servidor (`smartmailto-lara-manager`).
 
 ### Plantillas como codigo (aprovisionamiento, F-008 y F-009)
 
@@ -658,7 +714,7 @@ Para probar tu resolver del pull, usa `Smartmailto::fakePull()` (ver [Pull](#pul
 
 ## Contrato de eventos de Factura Facilita
 
-Fuente de verdad: `notificabot-conocimiento/features/2026-10-F003-sdk-ingesta-robusta/dimensiones/integracion.md`.
+Fuente de verdad: `smartmailto-conocimiento/features/2026-10-F003-sdk-ingesta-robusta/dimensiones/integracion.md`.
 
 | Evento | eventId | Identidad | object | properties | secrets |
 |---|---|---|---|---|---|
